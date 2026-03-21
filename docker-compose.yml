@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${BUBLIC_POSTGRES_USER:-bublic}
+      POSTGRES_PASSWORD: ${BUBLIC_POSTGRES_PASSWORD:-bublic_secret}
+      POSTGRES_DB: ${BUBLIC_POSTGRES_DB:-bublic_reviews}
+    ports:
+      - "5488:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bublic -d bublic_reviews"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - ./alembic:/app/alembic
+      - ./src:/app/src
+    command: alembic upgrade head
+    restart: "no"
+
+  app:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    volumes:
+      - ./src:/app/src
+    command: python -m src.main
+
+  dashboard:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./src:/app/src
+    command: streamlit run src/dashboard/app.py --server.port=8501 --server.address=0.0.0.0
+
+volumes:
+  pgdata:
