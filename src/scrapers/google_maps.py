@@ -327,7 +327,7 @@ class GoogleMapsScraper(BaseBrowserScraper):
                 published = self._parse_relative_date(date_text)
 
                 # Skip old reviews
-                if since and published < since:
+                if since and published <= since:
                     continue
 
                 # Text — only user review, exclude owner response (.CDe7pd)

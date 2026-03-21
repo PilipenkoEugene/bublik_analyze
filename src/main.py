@@ -55,7 +55,7 @@ async def run_scraping() -> None:
             reviews = await scraper.scrape(since=since)
             all_reviews.extend(reviews)
             logger.info(
-                "Scraped %d new reviews from %s", len(reviews), scraper.platform.value
+                "Scraped %d reviews from %s", len(reviews), scraper.platform.value
             )
         except Exception as e:
             logger.error("Scraper %s failed: %s", scraper.platform.value, e)
@@ -79,7 +79,7 @@ async def run_scraping() -> None:
                 for r in all_reviews
             ]
             inserted = await repo.upsert_reviews(reviews_dicts)
-            logger.info("Inserted %d new reviews (total scraped: %d)", inserted, len(all_reviews))
+            logger.info("Inserted %d new, %d duplicate (total scraped: %d)", inserted, len(all_reviews) - inserted, len(all_reviews))
 
     # Analyze complaints from negative reviews
     async with async_session() as session:
@@ -123,6 +123,7 @@ async def main() -> None:
         id="daily_scrape",
         name="Daily review scraping",
         replace_existing=True,
+        misfire_grace_time=None,
     )
     scheduler.start()
     logger.info("Scheduler started. Next scrape at 01:00 MSK (22:00 UTC)")

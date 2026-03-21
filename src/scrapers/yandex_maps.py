@@ -1,10 +1,11 @@
 import logging
+import random
 import re
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 from src.db.models import Platform
-from src.scrapers.base import BaseBrowserScraper
+from src.scrapers.base import BaseBrowserScraper, human_scroll, random_delay
 from src.scrapers.protocols import ReviewData
 
 logger = logging.getLogger(__name__)
@@ -40,17 +41,26 @@ class YandexMapsScraper(BaseBrowserScraper):
             page.on('response', capture_reviews)
 
             # Load the page
-            await page.goto(self.url, wait_until="networkidle", timeout=60000)
-            await page.wait_for_timeout(5000)
+            await page.goto(self.url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(await random_delay(5000, 8000))
 
-            # Debug: screenshot + check if reviews loaded
-            await page.screenshot(path="/app/debug_yandex_loaded.png")
             logger.info("Yandex page title: %s", await page.title())
+
+            # Sort by newest for incremental scraping
+            await self._sort_by_newest(page)
 
             # Scroll to trigger all lazy-loaded API pages
             prev_api_count = 0
             stale_rounds = 0
+            reached_old = False
             for i in range(200):
+                if reached_old:
+                    break
+
+                # Human-like scroll: move mouse, scroll by variable amount
+                await human_scroll(page, '.scroll__container')
+
+                # Then scroll to absolute bottom to trigger lazy loading
                 await page.evaluate("""() => {
                     const c = document.querySelector('.scroll__container');
                     if (c) c.scrollTop = c.scrollHeight;
@@ -61,17 +71,20 @@ class YandexMapsScraper(BaseBrowserScraper):
                     }
                     window.scrollTo(0, document.body.scrollHeight);
                 }""")
-                await page.wait_for_timeout(1500)
-
-                try:
-                    await page.keyboard.press("End")
-                except Exception:
-                    pass
+                await page.wait_for_timeout(await random_delay(500, 1500))
 
                 # Track API captures
                 if len(api_reviews) > prev_api_count:
                     stale_rounds = 0
                     prev_api_count = len(api_reviews)
+
+                    # Check if latest API reviews are older than `since`
+                    if since and api_reviews:
+                        last_review = api_reviews[-1]
+                        last_date = self._parse_api_date(last_review.get('updatedTime', ''))
+                        if last_date < since:
+                            logger.info("Yandex API: reached reviews older than %s, stopping", since)
+                            reached_old = True
                 else:
                     stale_rounds += 1
 
@@ -91,13 +104,13 @@ class YandexMapsScraper(BaseBrowserScraper):
             # Also parse API-captured reviews (these have better structured data)
             api_parsed = self._parse_api_reviews(api_reviews, since)
 
-            # Use whichever got more reviews
-            if len(api_parsed) > len(dom_reviews):
+            # API has exact dates and text — always prefer it, DOM is fallback
+            if api_parsed:
                 reviews = api_parsed
-                logger.info("Using API reviews (%d) over DOM (%d)", len(api_parsed), len(dom_reviews))
+                logger.info("Using API reviews (%d), DOM had %d", len(api_parsed), len(dom_reviews))
             else:
                 reviews = dom_reviews
-                logger.info("Using DOM reviews (%d) over API (%d)", len(dom_reviews), len(api_parsed))
+                logger.info("API empty, using DOM reviews (%d)", len(dom_reviews))
 
         except Exception as e:
             logger.error("Yandex Maps scrape failed: %s", e)
@@ -110,6 +123,75 @@ class YandexMapsScraper(BaseBrowserScraper):
 
         logger.info("Scraped %d new reviews from Yandex Maps", len(reviews))
         return reviews
+
+    async def _sort_by_newest(self, page) -> None:
+        """Sort Yandex reviews by newest first ('По новизне')."""
+        try:
+            # Step 1: find and click the sort trigger
+            # It's a leaf element (no children with same text) near "отзывов"
+            sort_btn = await page.evaluate("""() => {
+                const keywords = ['по умолчанию', 'по новизне', 'по дате', 'сначала новые'];
+                const all = document.querySelectorAll('span, a, button');
+                for (const el of all) {
+                    const text = el.textContent.trim().toLowerCase();
+                    const ownText = el.childElementCount === 0 ? text : '';
+                    // Must be a leaf or near-leaf with short text
+                    if (text.length > 3 && text.length < 25) {
+                        for (const kw of keywords) {
+                            if (text.includes(kw)) {
+                                el.click();
+                                return el.textContent.trim();
+                            }
+                        }
+                    }
+                }
+                return null;
+            }""")
+            if sort_btn:
+                logger.info("Clicked Yandex sort dropdown: '%s'", sort_btn)
+                await page.wait_for_timeout(await random_delay(1000, 2000))
+
+                # Step 2: screenshot dropdown for debugging
+                await page.screenshot(path="/app/debug_yandex_sort_dropdown.png")
+
+                # Step 3: select "По новизне" from the dropdown
+                # After clicking, a popup/menu appears with sort options
+                selected = await page.evaluate("""() => {
+                    const all = document.querySelectorAll(
+                        'div[role="option"], div[role="menuitem"], div[role="listbox"] *, ' +
+                        'li, span, a, button, label, div[class*="popup"] span, ' +
+                        'div[class*="menu"] span, div[class*="select"] span'
+                    );
+                    for (const el of all) {
+                        const text = el.textContent.trim().toLowerCase();
+                        if (text.length < 20 && text.includes('новизне')) {
+                            el.click();
+                            return el.textContent.trim();
+                        }
+                    }
+                    // Fallback: broader search
+                    const all2 = document.querySelectorAll('*');
+                    for (const el of all2) {
+                        if (el.children.length > 0) continue;  // only leaf nodes
+                        const text = el.textContent.trim().toLowerCase();
+                        if (text === 'по новизне') {
+                            el.click();
+                            return el.textContent.trim();
+                        }
+                    }
+                    return null;
+                }""")
+                if selected:
+                    logger.info("Selected Yandex sort: '%s'", selected)
+                    await page.wait_for_timeout(await random_delay(2000, 4000))
+                else:
+                    logger.warning("Could not find 'По новизне' in dropdown")
+                    await page.screenshot(path="/app/debug_yandex_sort_fail.png")
+                return
+
+            logger.debug("Could not find Yandex sort dropdown")
+        except Exception as e:
+            logger.debug("Yandex sort failed: %s", e)
 
     async def _expand_reviews(self, page) -> None:
         try:
@@ -137,7 +219,7 @@ class YandexMapsScraper(BaseBrowserScraper):
                 updated = r.get('updatedTime', '')
                 published = self._parse_api_date(updated)
 
-                if since and published < since:
+                if since and published <= since:
                     continue
 
                 ext_id = review_id or self.generate_id("yandex", author, updated, text or "")
@@ -233,7 +315,7 @@ class YandexMapsScraper(BaseBrowserScraper):
         reviews = []
         for r in raw:
             published = self._parse_dom_date(r["dateText"])
-            if since and published < since:
+            if since and published <= since:
                 continue
             ext_id = self.generate_id("yandex", r["author"], r["dateText"], r["text"] or "")
             reviews.append(ReviewData(

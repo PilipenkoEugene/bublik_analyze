@@ -266,7 +266,7 @@ class TwoGisScraper(BaseBrowserScraper):
         reviews = []
         for r in raw:
             published = self._parse_date(r["dateText"])
-            if since and published < since:
+            if since and published <= since:
                 continue
 
             ext_id = self.generate_id("twogis", r["author"], r["dateText"], r["text"] or "")

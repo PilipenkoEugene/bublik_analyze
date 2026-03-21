@@ -35,6 +35,7 @@ services:
     env_file: .env
     volumes:
       - ./src:/app/src
+      - browser_data:/app/browser_data
     command: python -m src.main
 
   dashboard:
@@ -51,3 +52,4 @@ services:
 
 volumes:
   pgdata:
+  browser_data:
