@@ -8,6 +8,7 @@ from src.db.models import Platform
 @dataclass
 class ReviewData:
     """Platform-agnostic review data transfer object."""
+    venue: str
     platform: Platform
     external_id: str
     author: str

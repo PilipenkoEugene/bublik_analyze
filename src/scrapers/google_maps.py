@@ -356,6 +356,7 @@ class GoogleMapsScraper(BaseBrowserScraper):
                 ext_id = self.generate_id("google", author, date_text, text or "")
 
                 reviews.append(ReviewData(
+                    venue=self.venue,
                     platform=Platform.GOOGLE,
                     external_id=ext_id,
                     author=author,

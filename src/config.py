@@ -1,4 +1,16 @@
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+
+@dataclass
+class Venue:
+    name: str
+    google: str
+    yandex: str
+    twogis: str
 
 
 class Settings(BaseSettings):
@@ -8,20 +20,6 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_db: str = "bublic_reviews"
-
-    # Scraping targets
-    twogis_url: str = (
-        "https://2gis.ru/stavropol/branches/70000001018219934"
-        "/firm/70000001018219935/41.918345%2C45.012166/tab/reviews"
-    )
-    yandex_url: str = (
-        "https://yandex.com/maps/org/bublik/1390659107/reviews/"
-        "?ll=41.918463%2C45.012415&z=14"
-    )
-    google_url: str = (
-        "https://www.google.com/maps/place//data="
-        "!4m2!3m1!1s0x40f9aa47b39946f7:0xa4fe975c8c941b8f"
-    )
 
     # Scheduler
     scheduler_hour: int = 1  # 01:00 MSK
@@ -45,3 +43,13 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def load_venues() -> list[Venue]:
+    """Load venue list from venues.json."""
+    venues_path = Path("/app/venues.json")
+    if not venues_path.exists():
+        # Fallback for local dev
+        venues_path = Path(__file__).parent.parent / "venues.json"
+    data = json.loads(venues_path.read_text(encoding="utf-8"))
+    return [Venue(**v) for v in data]

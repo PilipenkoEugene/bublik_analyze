@@ -27,10 +27,11 @@ class Platform(enum.Enum):
 class Review(Base):
     __tablename__ = "reviews"
     __table_args__ = (
-        UniqueConstraint("platform", "external_id", name="uq_platform_external_id"),
+        UniqueConstraint("venue", "platform", "external_id", name="uq_venue_platform_external_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    venue: Mapped[str] = mapped_column(String(255), nullable=False, index=True, server_default="Бублик Ставрополь")
     platform: Mapped[Platform] = mapped_column(Enum(Platform), nullable=False, index=True)
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     author: Mapped[str] = mapped_column(String(255), nullable=False)

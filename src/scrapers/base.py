@@ -132,8 +132,9 @@ async def human_scroll(page, container_selector: str | None = None) -> None:
 class BaseBrowserScraper:
     """Base class with shared Playwright browser logic."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, venue: str = "") -> None:
         self.url = url
+        self.venue = venue
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None

@@ -224,6 +224,7 @@ class YandexMapsScraper(BaseBrowserScraper):
 
                 ext_id = review_id or self.generate_id("yandex", author, updated, text or "")
                 reviews.append(ReviewData(
+                    venue=self.venue,
                     platform=Platform.YANDEX,
                     external_id=ext_id,
                     author=author,
@@ -319,6 +320,7 @@ class YandexMapsScraper(BaseBrowserScraper):
                 continue
             ext_id = self.generate_id("yandex", r["author"], r["dateText"], r["text"] or "")
             reviews.append(ReviewData(
+                venue=self.venue,
                 platform=Platform.YANDEX,
                 external_id=ext_id,
                 author=r["author"],

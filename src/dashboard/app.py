@@ -18,13 +18,23 @@ def get_session() -> Session:
     return Session(_engine)
 
 
+def fetch_venues() -> list[str]:
+    """Get list of all venues in the database."""
+    with get_session() as session:
+        result = session.execute(select(Review.venue).distinct().order_by(Review.venue))
+        return [row[0] for row in result.all()]
+
+
 def fetch_reviews(
+    venue: str | None = None,
     platform: Platform | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> list[dict]:
     with get_session() as session:
         query = select(Review).order_by(Review.published_at.desc())
+        if venue:
+            query = query.where(Review.venue == venue)
         if platform:
             query = query.where(Review.platform == platform)
         if date_from:
@@ -37,6 +47,7 @@ def fetch_reviews(
         return [
             {
                 "id": r.id,
+                "venue": r.venue,
                 "platform": r.platform.value,
                 "author": r.author,
                 "rating": r.rating,
@@ -49,6 +60,7 @@ def fetch_reviews(
 
 def fetch_stats_by_period(
     group_by: str,
+    venue: str | None = None,
     platform: Platform | None = None,
     date_from: datetime | None = None,
 ) -> list[dict]:
@@ -71,6 +83,8 @@ def fetch_stats_by_period(
             .group_by(date_trunc)
             .order_by(date_trunc)
         )
+        if venue:
+            query = query.where(Review.venue == venue)
         if platform:
             query = query.where(Review.platform == platform)
         if date_from:
@@ -127,11 +141,18 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("Bublik - Анализ отзывов")
-st.markdown("Детский развлекательный центр | Ставрополь")
+st.title("Анализ отзывов")
 
 # Sidebar filters
 st.sidebar.header("Фильтры")
+
+# Venue filter
+venues_list = fetch_venues()
+venue_options = {"Все заведения": None}
+for v in venues_list:
+    venue_options[v] = v
+selected_venue_label = st.sidebar.selectbox("Заведение", list(venue_options.keys()))
+selected_venue = venue_options[selected_venue_label]
 
 platform_options = {"Все": None, "Google": Platform.GOOGLE, "Яндекс": Platform.YANDEX, "2GIS": Platform.TWOGIS}
 selected_platform_label = st.sidebar.selectbox("Платформа", list(platform_options.keys()))
@@ -160,7 +181,7 @@ elif date_range == "За сегодня":
 
 # ── Main content ──────────────────────────────────────────────
 
-reviews_data = fetch_reviews(selected_platform, date_from)
+reviews_data = fetch_reviews(selected_venue, selected_platform, date_from)
 df = pd.DataFrame(reviews_data)
 
 if not df.empty:
@@ -173,12 +194,12 @@ if not df.empty:
         negative = len(df[df["rating"] <= 3])
         st.metric("Негативных (≤3)", negative)
     with col4:
-        platforms_count = df["platform"].nunique()
-        st.metric("Платформ", platforms_count)
+        venues_count = df["venue"].nunique()
+        st.metric("Заведений", venues_count)
 
     # Rating trend chart
     st.subheader("Динамика оценок")
-    stats_data = fetch_stats_by_period(selected_period, selected_platform, date_from)
+    stats_data = fetch_stats_by_period(selected_period, selected_venue, selected_platform, date_from)
     if stats_data:
         stats_df = pd.DataFrame(stats_data)
         fig = go.Figure()
@@ -287,10 +308,13 @@ if not df.empty:
         display_df = display_df[display_df["rating"] <= 3]
     if show_with_text:
         display_df = display_df[display_df["text"].str.len() > 0]
+
+    columns = ["venue", "platform", "author", "rating", "text", "published_at"]
     st.dataframe(
-        display_df[["platform", "author", "rating", "text", "published_at"]].head(50),
+        display_df[columns].head(50),
         use_container_width=True,
         column_config={
+            "venue": "Заведение",
             "platform": "Платформа",
             "author": "Автор",
             "rating": st.column_config.NumberColumn("Оценка", format="%.1f"),

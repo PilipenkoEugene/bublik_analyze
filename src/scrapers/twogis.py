@@ -271,6 +271,7 @@ class TwoGisScraper(BaseBrowserScraper):
 
             ext_id = self.generate_id("twogis", r["author"], r["dateText"], r["text"] or "")
             reviews.append(ReviewData(
+                venue=self.venue,
                 platform=Platform.TWOGIS,
                 external_id=ext_id,
                 author=r["author"],

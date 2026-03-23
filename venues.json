@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Бублик Ставрополь",
+    "google": "https://www.google.com/maps/place//data=!4m2!3m1!1s0x40f9aa47b39946f7:0xa4fe975c8c941b8f",
+    "yandex": "https://yandex.com/maps/org/bublik/1390659107/reviews/?ll=41.918463%2C45.012415&z=14",
+    "twogis": "https://2gis.ru/stavropol/branches/70000001018219934/firm/70000001018219935/41.918345%2C45.012166/tab/reviews"
+  },
+  {
+    "name": "Яркий Сибиряк Тюмень",
+    "google": "https://www.google.com/maps/place//data=!4m2!3m1!1s0x43bbe114aa8671bf:0x990e49880dbb474e",
+    "yandex": "https://yandex.com/maps/org/bublik/85590130860/reviews/?indoorLevel=1&ll=65.573889%2C57.120011&tab=reviews&z=17.11",
+    "twogis": "https://2gis.ru/tyumen/firm/70000001075324004/tab/reviews?m=65.573518%2C57.120165%2F16"
+  },
+  {
+    "name": "Арсиб Тюмень",
+    "google": "",
+    "yandex": "https://yandex.com/maps/org/bublik_bum_/73294280412/reviews/?indoorLevel=2&ll=65.555097%2C57.127770&tab=reviews&z=17.11",
+    "twogis": "https://2gis.ru/tyumen/firm/70000001083951656?m=65.555102%2C57.127985%2F16"
+  }
+]

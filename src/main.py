@@ -6,12 +6,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.analyzer.keyword_analyzer import KeywordComplaintAnalyzer
-from src.config import settings
+from src.config import load_venues, settings
 from src.db.models import Platform
 from src.db.repository import ComplaintRepository, ReviewRepository
 from src.db.session import async_session
 from src.scrapers.google_maps import GoogleMapsScraper
-from src.scrapers.protocols import ReviewScraperProtocol
 from src.scrapers.twogis import TwoGisScraper
 from src.scrapers.yandex_maps import YandexMapsScraper
 
@@ -22,45 +21,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_scrapers() -> list[ReviewScraperProtocol]:
-    """Factory: create all scrapers. Easy to swap to API-based implementations."""
-    return [
-        GoogleMapsScraper(settings.google_url),
-        YandexMapsScraper(settings.yandex_url),
-        TwoGisScraper(settings.twogis_url),
-    ]
-
-
 async def run_scraping() -> None:
-    """Run all scrapers, save results to DB, then analyze complaints."""
+    """Run all scrapers for all venues, save results to DB, then analyze complaints."""
     logger.info("=== Starting scraping job ===")
-    scrapers = get_scrapers()
+    venues = load_venues()
     all_reviews = []
 
-    # Get last known review date per platform for incremental scraping
-    platform_since: dict[Platform, datetime | None] = {}
-    async with async_session() as session:
-        repo = ReviewRepository(session)
+    for venue in venues:
+        logger.info("--- Scraping venue: %s ---", venue.name)
+        scrapers = []
+        if venue.google:
+            scrapers.append(GoogleMapsScraper(venue.google, venue.name))
+        if venue.yandex:
+            scrapers.append(YandexMapsScraper(venue.yandex, venue.name))
+        if venue.twogis:
+            scrapers.append(TwoGisScraper(venue.twogis, venue.name))
+
+        # Get last known review date per platform+venue for incremental scraping
+        async with async_session() as session:
+            repo = ReviewRepository(session)
+            platform_since: dict[Platform, datetime | None] = {}
+            for scraper in scrapers:
+                platform_since[scraper.platform] = await repo.get_last_review_date(
+                    scraper.platform, venue.name
+                )
+
         for scraper in scrapers:
-            platform_since[scraper.platform] = await repo.get_last_review_date(scraper.platform)
+            try:
+                since = platform_since.get(scraper.platform)
+                if since:
+                    logger.info("Incremental scrape for %s/%s since %s",
+                                venue.name, scraper.platform.value, since)
+                else:
+                    logger.info("Full scrape for %s/%s (no previous data)",
+                                venue.name, scraper.platform.value)
 
-    for scraper in scrapers:
-        try:
-            since = platform_since.get(scraper.platform)
-            if since:
-                logger.info("Incremental scrape for %s since %s", scraper.platform.value, since)
-            else:
-                logger.info("Full scrape for %s (no previous data)", scraper.platform.value)
-
-            reviews = await scraper.scrape(since=since)
-            all_reviews.extend(reviews)
-            logger.info(
-                "Scraped %d reviews from %s", len(reviews), scraper.platform.value
-            )
-        except Exception as e:
-            logger.error("Scraper %s failed: %s", scraper.platform.value, e)
-        finally:
-            await scraper.close()
+                reviews = await scraper.scrape(since=since)
+                all_reviews.extend(reviews)
+                logger.info("Scraped %d reviews from %s/%s",
+                            len(reviews), venue.name, scraper.platform.value)
+            except Exception as e:
+                logger.error("Scraper %s/%s failed: %s",
+                             venue.name, scraper.platform.value, e)
+            finally:
+                await scraper.close()
 
     # Save to DB
     if all_reviews:
@@ -68,6 +72,7 @@ async def run_scraping() -> None:
             repo = ReviewRepository(session)
             reviews_dicts = [
                 {
+                    "venue": r.venue,
                     "platform": r.platform,
                     "external_id": r.external_id,
                     "author": r.author,
@@ -79,12 +84,13 @@ async def run_scraping() -> None:
                 for r in all_reviews
             ]
             inserted = await repo.upsert_reviews(reviews_dicts)
-            logger.info("Inserted %d new, %d duplicate (total scraped: %d)", inserted, len(all_reviews) - inserted, len(all_reviews))
+            logger.info("Inserted %d new, %d duplicate (total scraped: %d)",
+                        inserted, len(all_reviews) - inserted, len(all_reviews))
 
     # Analyze complaints from negative reviews
     async with async_session() as session:
         repo = ReviewRepository(session)
-        negative_reviews = await repo.get_reviews(rating_max=3.0, limit=1000)
+        negative_reviews = await repo.get_reviews(rating_max=3.0, limit=5000)
         texts = [r.text for r in negative_reviews if r.text]
 
         if texts:

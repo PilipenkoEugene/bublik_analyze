@@ -12,13 +12,13 @@ class ReviewRepository:
         self._session = session
 
     async def upsert_reviews(self, reviews: list[dict]) -> int:
-        """Insert reviews, skip duplicates by (platform, external_id). Returns inserted count."""
+        """Insert reviews, skip duplicates by (venue, platform, external_id). Returns inserted count."""
         if not reviews:
             return 0
 
         stmt = insert(Review).values(reviews)
         stmt = stmt.on_conflict_do_nothing(
-            constraint="uq_platform_external_id"
+            constraint="uq_venue_platform_external_id"
         )
         result = await self._session.execute(stmt)
         await self._session.commit()
@@ -96,12 +96,11 @@ class ReviewRepository:
         result = await self._session.execute(select(func.count(Review.id)))
         return result.scalar() or 0
 
-    async def get_last_review_date(self, platform: Platform) -> datetime | None:
-        """Get the most recent review date for a given platform."""
-        query = (
-            select(func.max(Review.published_at))
-            .where(Review.platform == platform)
-        )
+    async def get_last_review_date(self, platform: Platform, venue: str | None = None) -> datetime | None:
+        """Get the most recent review date for a given platform+venue."""
+        query = select(func.max(Review.published_at)).where(Review.platform == platform)
+        if venue:
+            query = query.where(Review.venue == venue)
         result = await self._session.execute(query)
         return result.scalar()
 
