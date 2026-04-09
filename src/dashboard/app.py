@@ -197,7 +197,7 @@ section[data-testid="stMain"] [data-testid="stHorizontalBlock"] {
     background: #1B1F3B !important;
     border-radius: 20px;
     padding: 18px 32px;
-    margin-bottom: 4px;
+    margin-bottom: 16px;
     display: flex;
     align-items: center;
 }
@@ -261,8 +261,8 @@ div[data-testid="stVerticalBlockBorderWrapper"].st-emotion-cache-0 > div {
     padding: 0 !important;
 }
 
-/* ═══ CARDS ═══ */
-div[data-testid="stVerticalBlockBorderWrapper"].st-emotion-cache-ziiulf {
+/* ═══ CARDS (bordered containers) ═══ */
+div[data-testid="stVerticalBlockBorderWrapper"]:not(.st-emotion-cache-0) {
     background: #FFFFFF !important;
     border: none !important;
     border-radius: 20px !important;
@@ -270,7 +270,7 @@ div[data-testid="stVerticalBlockBorderWrapper"].st-emotion-cache-ziiulf {
     overflow: hidden !important;
     padding: 24px !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"].st-emotion-cache-ziiulf > div {
+div[data-testid="stVerticalBlockBorderWrapper"]:not(.st-emotion-cache-0) > div {
     background: #FFFFFF !important;
 }
 
@@ -332,6 +332,11 @@ code {
     border: none !important;
     border-radius: 20px !important;
     font-weight: 600 !important;
+}
+/* plotly — round the fullscreen frame + SVG container */
+div[data-testid="stFullScreenFrame"] {
+    border-radius: 14px !important;
+    overflow: hidden !important;
 }
 /* plotly hover — remove SVG clipPath so tooltip text isn't clipped */
 div[data-testid="stPlotlyChart"] .hoverlayer,
