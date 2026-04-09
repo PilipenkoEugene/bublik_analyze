@@ -11,7 +11,7 @@ from src.db.models import Platform
 from src.db.repository import ComplaintRepository, ReviewRepository
 from src.db.session import async_session
 from src.scrapers.google_maps import GoogleMapsScraper
-from src.scrapers.twogis import TwoGisScraper
+from src.scrapers.twogis_api import TwoGisApiScraper
 from src.scrapers.yandex_maps import YandexMapsScraper
 
 logging.basicConfig(
@@ -27,7 +27,7 @@ async def run_scraping() -> None:
     venues = load_venues()
     all_reviews = []
 
-    for venue in venues:
+    for vi, venue in enumerate(venues):
         logger.info("--- Scraping venue: %s ---", venue.name)
         scrapers = []
         if venue.google:
@@ -35,7 +35,7 @@ async def run_scraping() -> None:
         if venue.yandex:
             scrapers.append(YandexMapsScraper(venue.yandex, venue.name))
         if venue.twogis:
-            scrapers.append(TwoGisScraper(venue.twogis, venue.name))
+            scrapers.append(TwoGisApiScraper(venue.twogis, venue.name))
 
         # Get last known review date per platform+venue for incremental scraping
         async with async_session() as session:
@@ -46,7 +46,7 @@ async def run_scraping() -> None:
                     scraper.platform, venue.name
                 )
 
-        for scraper in scrapers:
+        for i, scraper in enumerate(scrapers):
             try:
                 since = platform_since.get(scraper.platform)
                 if since:
@@ -65,6 +65,15 @@ async def run_scraping() -> None:
                              venue.name, scraper.platform.value, e)
             finally:
                 await scraper.close()
+
+            # Pause between scrapers to avoid rate-limiting / captchas
+            if i < len(scrapers) - 1:
+                await asyncio.sleep(10)
+
+        # Pause between venues
+        if vi < len(venues) - 1:
+            logger.info("Pausing 15s before next venue...")
+            await asyncio.sleep(15)
 
     # Save to DB
     if all_reviews:

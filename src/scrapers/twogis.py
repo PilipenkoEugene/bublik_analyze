@@ -22,6 +22,32 @@ class TwoGisScraper(BaseBrowserScraper):
     def platform(self) -> Platform:
         return Platform.TWOGIS
 
+    async def _new_page(self):
+        """Override to skip cookie loading — stale 2GIS cookies cause Sber ID redirects."""
+        from playwright.async_api import async_playwright
+        if self._browser is None:
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars",
+                    "--window-size=1280,900",
+                ],
+            )
+        self._context = await self._browser.new_context(
+            locale="ru-RU",
+            timezone_id="Asia/Yekaterinburg",
+            viewport={"width": 1280, "height": 900},
+            user_agent=self._user_agent,
+        )
+        from src.scrapers.base import _STEALTH_SCRIPTS
+        await self._context.add_init_script("\n".join(_STEALTH_SCRIPTS))
+        # Deliberately skip cookie loading for 2GIS
+        return await self._context.new_page()
+
     async def scrape(self, since: datetime | None = None) -> list[ReviewData]:
         logger.info("Starting 2GIS scrape (since=%s): %s", since, self.url)
         page = await self._new_page()
@@ -31,7 +57,26 @@ class TwoGisScraper(BaseBrowserScraper):
             await page.goto(self.url, wait_until="networkidle", timeout=30000)
             await page.wait_for_timeout(3000)
 
-            # Sort by newest — click sort dropdown, then "По дате" / "Сначала новые"
+            # Check for captcha or broken page
+            title = await page.title()
+            if "captcha" in title.lower():
+                logger.error("2GIS captcha detected for %s (title: %s)", self.venue, title)
+                await page.screenshot(path="/app/browser_data/debug_2gis_captcha.png")
+                return reviews
+
+            # Ensure URL has /tab/reviews so page loads reviews directly
+            current_url = page.url
+            if "/tab/reviews" not in current_url:
+                # Navigate to reviews tab URL
+                reviews_url = current_url.split("?")[0].rstrip("/") + "/tab/reviews"
+                query = current_url.split("?")[1] if "?" in current_url else ""
+                if query:
+                    reviews_url += "?" + query
+                logger.info("2GIS: redirecting to reviews tab: %s", reviews_url)
+                await page.goto(reviews_url, wait_until="networkidle", timeout=30000)
+                await page.wait_for_timeout(3000)
+
+            # Sort by newest
             await self._sort_by_newest(page)
 
             # Load all reviews by clicking "Загрузить ещё" repeatedly
@@ -39,6 +84,11 @@ class TwoGisScraper(BaseBrowserScraper):
 
             # Extract reviews via JS for speed and reliability
             reviews = await self._extract_reviews_js(page, since)
+
+            if not reviews:
+                title = await page.title()
+                logger.warning("2GIS: 0 reviews extracted for %s (title: %s)", self.venue, title)
+                await page.screenshot(path="/app/browser_data/debug_2gis_empty.png")
 
         except Exception as e:
             logger.error("2GIS scrape failed: %s", e)
@@ -54,22 +104,61 @@ class TwoGisScraper(BaseBrowserScraper):
 
     async def _sort_by_newest(self, page) -> None:
         try:
-            # 2GIS sort dropdown — look for any sort-like button
-            sort_btn = page.locator('div._14nw86g, button:has-text("Сначала"), div[class*="sort"] button')
-            if await sort_btn.count() > 0:
-                await sort_btn.first.click()
+            # Dismiss 2GIS sort-change banner if present
+            await page.evaluate("""() => {
+                document.querySelectorAll('div').forEach(el => {
+                    if (el.textContent.includes('Изменили сортировку') && el.offsetHeight > 0) {
+                        const close = el.querySelector('button, [class*="close"], [class*="dismiss"]');
+                        if (close) close.click();
+                    }
+                });
+            }""")
+            await page.wait_for_timeout(500)
+
+            # 2GIS new layout: sort selector is a clickable div showing current sort
+            # e.g. div._8pvfb2 with text "По доверию", options in sibling div._1u9fru1
+            sorted = await page.evaluate("""() => {
+                // Find the sort trigger — a small div whose own text is exactly a sort label
+                const labels = ['По доверию', 'По новизне'];
+                const allDivs = document.querySelectorAll('div');
+                for (const div of allDivs) {
+                    const ownText = div.childNodes.length <= 2
+                        ? div.textContent.trim() : '';
+                    if (labels.includes(ownText) && div.offsetHeight > 0 &&
+                        div.offsetHeight < 60 && div.offsetWidth < 250) {
+                        // This looks like the sort trigger — click it to open dropdown
+                        div.click();
+                        return 'clicked_trigger: ' + ownText;
+                    }
+                }
+                return null;
+            }""")
+            if sorted:
+                logger.info("2GIS sort: %s", sorted)
                 await page.wait_for_timeout(1000)
-                by_date = page.locator(
-                    'div[role="option"]:has-text("дате"), '
-                    'div[role="option"]:has-text("новые"), '
-                    'li:has-text("дате"), span:has-text("Сначала новые")'
-                )
-                if await by_date.count() > 0:
-                    await by_date.first.click()
+
+                # Now find and click "По новизне" option
+                clicked = await page.evaluate("""() => {
+                    const allDivs = document.querySelectorAll('div');
+                    for (const div of allDivs) {
+                        const text = div.textContent.trim();
+                        if (text === 'По новизне' && div.offsetHeight > 0 &&
+                            div.children.length === 0) {
+                            div.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+                if clicked:
                     await page.wait_for_timeout(2000)
-                    logger.info("Sorted 2GIS reviews by date")
-        except Exception:
-            logger.debug("Could not sort 2GIS reviews by date")
+                    logger.info("Sorted 2GIS reviews by newest")
+                else:
+                    logger.warning("2GIS: could not find 'По новизне' option")
+            else:
+                logger.warning("2GIS sort trigger not found on page")
+        except Exception as e:
+            logger.warning("Could not sort 2GIS reviews: %s", e)
 
     async def _load_all_reviews(self, page, since: datetime | None) -> None:
         """Click 'Загрузить ещё' button and scroll to load all reviews."""

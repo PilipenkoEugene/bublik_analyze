@@ -16,13 +16,19 @@ class ReviewRepository:
         if not reviews:
             return 0
 
-        stmt = insert(Review).values(reviews)
-        stmt = stmt.on_conflict_do_nothing(
-            constraint="uq_venue_platform_external_id"
-        )
-        result = await self._session.execute(stmt)
+        # asyncpg limits query parameters to 32767; split into batches
+        batch_size = 4000
+        total_inserted = 0
+        for i in range(0, len(reviews), batch_size):
+            batch = reviews[i : i + batch_size]
+            stmt = insert(Review).values(batch)
+            stmt = stmt.on_conflict_do_nothing(
+                constraint="uq_venue_platform_external_id"
+            )
+            result = await self._session.execute(stmt)
+            total_inserted += result.rowcount  # type: ignore[union-attr]
         await self._session.commit()
-        return result.rowcount  # type: ignore[return-value]
+        return total_inserted
 
     async def get_avg_rating(
         self,
